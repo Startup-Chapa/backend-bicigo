@@ -1,6 +1,48 @@
-@backend_bicigo_HostAddress = http://localhost:5267
+@host = http://localhost:5267
 
-GET {{backend_bicigo_HostAddress}}/weatherforecast/
+### GET plans
+GET {{host}}/api/v1/plans
 Accept: application/json
 
-###
+### GET plan features
+GET {{host}}/api/v1/plan-features
+Accept: application/json
+
+### GET subscriptions
+GET {{host}}/api/v1/subscriptions
+Accept: application/json
+
+### GET payments
+GET {{host}}/api/v1/payments
+Accept: application/json
+
+### GET payments by user
+GET {{host}}/api/v1/payments?userId=1
+Accept: application/json
+
+### POST payment (TOPUP)
+POST {{host}}/api/v1/payments
+Content-Type: application/json
+
+{
+  "userId": 1,
+  "type": "TOPUP",
+  "amount": 50,
+  "currency": "PEN",
+  "isAutomatic": false
+}
+
+### GET payment methods
+GET {{host}}/api/v1/payment-methods
+Accept: application/json
+
+### POST payment method
+POST {{host}}/api/v1/payment-methods
+Content-Type: application/json
+
+{
+  "userId": 1,
+  "token": "****2777",
+  "type": "CARD",
+  "isDefault": true
+}
