@@ -1,3 +1,4 @@
+using backend_bicigo.Billing.Domain.Model.Aggregates;
 using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Configuration.Extensions;
 using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Interceptors;
 using Microsoft.EntityFrameworkCore;
@@ -5,8 +6,13 @@ using Microsoft.EntityFrameworkCore;
 namespace backend_bicigo.Shared.Infrastructure.Persistence.EFC.Configuration;
 
 /// <summary>
-///     Application database context
+///     Application database context (BiciGO).
 /// </summary>
+/// <remarks>
+///     Registers the Billing bounded context entities. Table/column names use the
+///     snake_case plural convention via
+///     <see cref="ModelBuilderExtensions.UseSnakeCaseNamingConvention"/>.
+/// </remarks>
 public class AppDbContext(DbContextOptions options) : DbContext(options)
 {
     /// <inheritdoc />
@@ -22,20 +28,26 @@ public class AppDbContext(DbContextOptions options) : DbContext(options)
     {
         base.OnModelCreating(builder);
 
-        builder.Entity<FavoriteSource>().HasKey(f => f.Id);
-        builder.Entity<FavoriteSource>().Property(f => f.Id).IsRequired().ValueGeneratedOnAdd();
-        builder.Entity<FavoriteSource>()
-            .Property(f => f.SourceId)
-            .HasConversion(valueObject => valueObject.Value, value => new SourceId(value))
-            .IsRequired();
+        // Billing (5 tables)
+        builder.Entity<Plan>().HasKey(p => p.Id);
+        builder.Entity<Plan>().Property(p => p.Id).IsRequired().ValueGeneratedOnAdd();
 
-        builder.Entity<FavoriteSource>()
-            .Property(f => f.NewsApiKey)
-            .HasConversion(valueObject => valueObject.Value, value => new NewsApiKey(value))
-            .IsRequired();
-        builder.Entity<FavoriteSource>()
-            .HasIndex(f => new { f.NewsApiKey, f.SourceId })
-            .IsUnique();
+        builder.Entity<PlanFeature>().HasKey(p => p.Id);
+        builder.Entity<PlanFeature>().Property(p => p.Id).IsRequired().ValueGeneratedOnAdd();
+        builder.Entity<PlanFeature>().HasIndex(p => new { p.PlanId, p.Name }).IsUnique();
+
+        builder.Entity<Subscription>().HasKey(s => s.Id);
+        builder.Entity<Subscription>().Property(s => s.Id).IsRequired().ValueGeneratedOnAdd();
+        builder.Entity<Subscription>().HasIndex(s => new { s.UserId, s.Status });
+
+        builder.Entity<Payment>().HasKey(p => p.Id);
+        builder.Entity<Payment>().Property(p => p.Id).IsRequired().ValueGeneratedOnAdd();
+        builder.Entity<Payment>().HasIndex(p => p.UserId);
+        builder.Entity<Payment>().HasIndex(p => p.SubscriptionId);
+
+        builder.Entity<PaymentMethod>().HasKey(p => p.Id);
+        builder.Entity<PaymentMethod>().Property(p => p.Id).IsRequired().ValueGeneratedOnAdd();
+        builder.Entity<PaymentMethod>().HasIndex(p => p.UserId);
 
         builder.UseSnakeCaseNamingConvention();
     }
