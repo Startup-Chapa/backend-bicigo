@@ -21,7 +21,6 @@
 
     <ItemGroup>
       <Folder Include="Iam\Application\" />
-      <Folder Include="Iam\Infrastructure\" />
     </ItemGroup>
 
 </Project>
