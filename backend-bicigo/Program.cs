@@ -1,10 +1,48 @@
+using backend_bicigo.Billing.Application.Internal.CommandServices;
+using backend_bicigo.Billing.Application.Internal.QueryServices;
+using backend_bicigo.Billing.Application.Services;
+using backend_bicigo.Billing.Domain.Repositories;
+using backend_bicigo.Billing.Infrastructure.Persistence.EFC.Repositories;
+using backend_bicigo.Shared.Domain.Repositories;
+using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Configuration;
+using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Repositories;
+using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Seed;
+using Microsoft.EntityFrameworkCore;
+using Scalar.AspNetCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
+// Database connection (MySQL)
+builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connectionString))
+        throw new InvalidOperationException("Database connection string is not set in the configuration.");
+    options.UseMySQL(connectionString)
+        .UseLoggerFactory(serviceProvider.GetRequiredService<ILoggerFactory>())
+        .EnableDetailedErrors();
+});
+
+// Shared
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+// Billing
+builder.Services.AddScoped<IBillingRepository, SubscriptionRepository>();
+builder.Services.AddScoped<IBillingCommandService, BillingCommandService>();
+builder.Services.AddScoped<IBillingQueryService, BillingQueryService>();
+
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+    DatabaseSeeder.Seed(db);
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -14,28 +52,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-    {
-        var forecast = Enumerable.Range(1, 5).Select(index =>
-                new WeatherForecast
-                (
-                    DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                    Random.Shared.Next(-20, 55),
-                    summaries[Random.Shared.Next(summaries.Length)]
-                ))
-            .ToArray();
-        return forecast;
-    })
-    .WithName("GetWeatherForecast");
+// Scalar API reference
+app.MapScalarApiReference();
+app.MapControllers();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

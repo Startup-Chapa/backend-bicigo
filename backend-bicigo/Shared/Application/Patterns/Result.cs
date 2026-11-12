@@ -1,4 +1,4 @@
-namespace CatchUpPlatform.API.Shared.Application.Patterns;
+namespace backend_bicigo.Shared.Application.Patterns;
 
 /// <summary>
 /// Represents the outcome of an operation that can succeed with a value or fail with an error.
