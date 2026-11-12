@@ -1,7 +1,7 @@
 using backend_bicigo.Shared.Domain.Repositories;
 using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Configuration;
 
-namespace CatchUpPlatform.API.Shared.Infrastructure.Persistence.EFC.Repositories;
+namespace backend_bicigo.Shared.Infrastructure.Persistence.EFC.Repositories;
 
 /// <summary>
 ///     Unit of work implementation for coordinating database transactions.
