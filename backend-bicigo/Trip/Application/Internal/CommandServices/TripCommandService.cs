@@ -1,4 +1,5 @@
-using backend_bicigo.Fleet.Domain.Model.Aggregates;
+using backend_bicigo.Billing.Domain.Model.Aggregates;
+using backend_bicigo.Iam.Domain.Model.Aggregates;
 using backend_bicigo.Shared.Application.Patterns;
 using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Configuration;
 using backend_bicigo.Trip.Application.Errors;
@@ -15,26 +16,16 @@ namespace backend_bicigo.Trip.Application.Internal.CommandServices;
 /// <param name="context">EF Core context.</param>
 public class TripCommandService(AppDbContext context) : ITripCommandService
 {
+    /// <summary>Rate used when neither the user subscription nor the tariff plan can be resolved.</summary>
+    private const decimal DefaultPricePerKm = 0.29m;
+
     /// <inheritdoc />
     public async Task<Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, CreateTripError>> Handle(CreateTripCommand command, CancellationToken cancellationToken = default)
     {
         try
         {
-            var duplicate = await context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>()
-                .AnyAsync(t => t.TripId == command.TripId.Trim(), cancellationToken);
+            var duplicate = await context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>().AnyAsync(t => t.TripId == command.TripId.Trim(), cancellationToken);
             if (duplicate) return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, CreateTripError>.Failure(CreateTripError.DuplicateTripId);
-
-            var activeTrip = await context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>()
-                .AnyAsync(t => t.UserId == command.UserId.Trim() &&
-                    (t.Status == backend_bicigo.Trip.Domain.Model.Aggregates.Trip.Statuses.Pending ||
-                     t.Status == backend_bicigo.Trip.Domain.Model.Aggregates.Trip.Statuses.InProgress), cancellationToken);
-            if (activeTrip) return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, CreateTripError>.Failure(CreateTripError.ActiveTripExists);
-
-            var bicycle = await FindBicycleAsync(command.BicycleId, cancellationToken);
-            if (bicycle is null) return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, CreateTripError>.Failure(CreateTripError.RelatedResourceNotFound);
-            if (bicycle.Status != Bicycle.Statuses.Available)
-                return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, CreateTripError>.Failure(CreateTripError.BicycleUnavailable);
-
             var entity = new backend_bicigo.Trip.Domain.Model.Aggregates.Trip(command);
             await context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>().AddAsync(entity, cancellationToken);
             await context.SaveChangesAsync(cancellationToken);
@@ -57,16 +48,8 @@ public class TripCommandService(AppDbContext context) : ITripCommandService
         {
             var duplicate = await context.Set<QrValidation>().AnyAsync(q => q.ValidationId == command.ValidationId.Trim(), cancellationToken);
             if (duplicate) return new Result<QrValidation, CreateTripError>.Failure(CreateTripError.DuplicateTripId);
-
-            var trip = await context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>()
-                .FirstOrDefaultAsync(t => t.TripId == command.TripId.Trim(), cancellationToken);
-            if (trip is null || trip.BicycleId != command.BicycleId.Trim())
-                return new Result<QrValidation, CreateTripError>.Failure(CreateTripError.RelatedResourceNotFound);
-            var bicycle = await FindBicycleAsync(command.BicycleId, cancellationToken);
-            if (bicycle is null) return new Result<QrValidation, CreateTripError>.Failure(CreateTripError.RelatedResourceNotFound);
-
             var entity = new QrValidation(command);
-            entity.Validate(bicycle.QrCode);
+            if (!string.IsNullOrWhiteSpace(command.ExpectedQrCode)) entity.Validate(command.ExpectedQrCode);
             await context.Set<QrValidation>().AddAsync(entity, cancellationToken);
             await context.SaveChangesAsync(cancellationToken);
             return new Result<QrValidation, CreateTripError>.Success(entity);
@@ -81,15 +64,81 @@ public class TripCommandService(AppDbContext context) : ITripCommandService
         }
     }
 
-    private async Task<Bicycle?> FindBicycleAsync(string bicycleId, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public async Task<Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>> Handle(FinishTripCommand command, CancellationToken cancellationToken = default)
     {
-        var bicycles = context.Set<Bicycle>();
-        var bicycle = await bicycles.FirstOrDefaultAsync(
-            b => b.BikeCode == bicycleId.Trim() || b.SerialNumber == bicycleId.Trim(), cancellationToken);
-        if (bicycle is not null) return bicycle;
-        return int.TryParse(bicycleId, out var numericId)
-            ? await bicycles.FirstOrDefaultAsync(b => b.Id == numericId, cancellationToken)
-            : null;
+        if (command.DistanceKm < 0)
+            return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>.Failure(FinishTripError.InvalidDistance);
+
+        var entity = await context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>()
+            .FirstOrDefaultAsync(t => t.Id == command.Id, cancellationToken);
+        if (entity is null)
+            return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>.Failure(FinishTripError.NotFound);
+
+        // Only IN_PROGRESS -> FINISHED is a valid transition.
+        if (entity.Status != backend_bicigo.Trip.Domain.Model.Aggregates.Trip.Statuses.InProgress)
+            return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>.Failure(FinishTripError.InvalidTransition);
+
+        try
+        {
+            var (pricePerKm, isPremium) = await ResolveRateAsync(entity.UserId, cancellationToken);
+
+            // The finish timestamp is always generated by the server (never trusted from the client).
+            entity.FinishTrip(command.DistanceKm, pricePerKm, isPremium);
+            await context.SaveChangesAsync(cancellationToken);
+
+            return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>.Success(entity);
+        }
+        catch (ArgumentException)
+        {
+            return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>.Failure(FinishTripError.InvalidDistance);
+        }
+        catch (Exception)
+        {
+            return new Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>.Failure(FinishTripError.UnexpectedError);
+        }
     }
 
+    /// <summary>
+    ///     Resolves the price per km and premium flag for the trip owner.
+    ///     Pro users ride free; tariff users use their active PAY_PER_USE subscription plan
+    ///     (falling back to the default PAY_PER_USE plan and finally to 0.29 PEN/km).
+    /// </summary>
+    private async Task<(decimal PricePerKm, bool IsPremium)> ResolveRateAsync(string tripUserId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(tripUserId)) return (DefaultPricePerKm, false);
+
+        var rawUserId = tripUserId.Trim();
+        User? user;
+        if (int.TryParse(rawUserId, out var numericUserId))
+            user = await context.Set<User>().AsNoTracking().FirstOrDefaultAsync(u => u.Id == numericUserId, cancellationToken);
+        else
+            user = await context.Set<User>().AsNoTracking().FirstOrDefaultAsync(u => u.Email == rawUserId, cancellationToken);
+
+        if (user is not null && string.Equals(user.Plan, "pro", StringComparison.OrdinalIgnoreCase))
+            return (0m, true);
+
+        if (user is not null)
+        {
+            var payPerUseSubscription = await context.Set<Subscription>().AsNoTracking()
+                .Where(s => s.UserId == user.Id && s.Status == "ACTIVE" && s.PlanType == "PAY_PER_USE")
+                .OrderByDescending(s => s.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (payPerUseSubscription is not null)
+            {
+                var subscriptionPlan = await context.Set<Plan>().AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.Id == payPerUseSubscription.PlanId, cancellationToken);
+                if (subscriptionPlan is not null && subscriptionPlan.PricePerKm > 0)
+                    return (subscriptionPlan.PricePerKm, false);
+            }
+        }
+
+        var defaultPlan = await context.Set<Plan>().AsNoTracking()
+            .Where(p => p.Type == "PAY_PER_USE" && p.PricePerKm > 0)
+            .OrderBy(p => p.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return (defaultPlan?.PricePerKm ?? DefaultPricePerKm, false);
+    }
 }
