@@ -1,0 +1,6 @@
+﻿# Ignorar carpetas de compilación locales
+obj/
+bin/
+
+# Ignorar la configuración de Rider que está un nivel arriba
+../.idea/
