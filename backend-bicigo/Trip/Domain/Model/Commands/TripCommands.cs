@@ -7,6 +7,18 @@ public record CreateTripCommand(
     string BicycleId,
     string? StartedAt = null);
 
+/// <summary>
+///     Command to finish a trip (POST /trips/{id}/finish).
+///     The rate is resolved server-side from the user plan/subscription.
+/// </summary>
+/// <param name="Id">Server trip id.</param>
+/// <param name="DistanceKm">Distance ridden in km (&gt;= 0).</param>
+/// <param name="FinishedAt">Optional finish timestamp ISO (defaults to server UTC now).</param>
+public record FinishTripCommand(
+    int Id,
+    decimal DistanceKm,
+    string? FinishedAt = null);
+
 /// <summary>Command to update a trip (status, distance, cost).</summary>
 public record UpdateTripCommand(
     string? UserId = null,

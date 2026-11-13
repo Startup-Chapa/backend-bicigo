@@ -11,6 +11,12 @@ public interface ITripCommandService
     /// <summary>Handles trip creation.</summary>
     Task<Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, CreateTripError>> Handle(CreateTripCommand command, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    ///     Handles trip finalization: validates the IN_PROGRESS → FINISHED transition,
+    ///     resolves the rate server-side and computes the total cost.
+    /// </summary>
+    Task<Result<backend_bicigo.Trip.Domain.Model.Aggregates.Trip, FinishTripError>> Handle(FinishTripCommand command, CancellationToken cancellationToken = default);
+
     /// <summary>Handles QR validation creation.</summary>
     Task<Result<QrValidation, CreateTripError>> Handle(CreateQrValidationCommand command, CancellationToken cancellationToken = default);
 }

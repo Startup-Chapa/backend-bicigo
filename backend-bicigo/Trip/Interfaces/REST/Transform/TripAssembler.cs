@@ -46,6 +46,13 @@ public static class TripAssembler
     public static CreateTripCommand ToCreateTripCommand(CreateTripResource resource) =>
         new(resource.TripId.Trim(), resource.UserId.Trim(), resource.BicycleId.Trim(), resource.StartedAt);
 
+    /// <summary>Assembles a finish-trip command.</summary>
+    /// <param name="id">Server trip id.</param>
+    /// <param name="resource">The finish resource.</param>
+    /// <returns>The command.</returns>
+    public static FinishTripCommand ToFinishTripCommand(int id, FinishTripResource resource) =>
+        new(id, resource.DistanceKm ?? 0m);
+
     /// <summary>Assembles a create-QR command.</summary>
     /// <param name="resource">The create resource.</param>
     /// <returns>The command.</returns>

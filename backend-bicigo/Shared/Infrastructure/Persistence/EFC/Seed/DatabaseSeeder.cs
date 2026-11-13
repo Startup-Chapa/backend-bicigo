@@ -1,12 +1,21 @@
 using System.Reflection;
 using backend_bicigo.Billing.Domain.Model.Aggregates;
 using backend_bicigo.Billing.Domain.Model.Commands;
+using backend_bicigo.Fleet.Domain.Model.Aggregates;
+using backend_bicigo.Fleet.Domain.Model.Commands;
+using backend_bicigo.Iam.Domain.Model.Aggregates;
+using backend_bicigo.Iam.Domain.Model.Commands;
+using backend_bicigo.Maintenance.Domain.Model.Aggregates;
+using backend_bicigo.Maintenance.Domain.Model.Commands;
 using backend_bicigo.Shared.Infrastructure.Persistence.EFC.Configuration;
+using backend_bicigo.Trip.Domain.Model.Aggregates;
+using backend_bicigo.Trip.Domain.Model.Commands;
 
 namespace backend_bicigo.Shared.Infrastructure.Persistence.EFC.Seed;
 
 /// <summary>
 ///     Mock seed data (mirrors server/db.json) loaded on startup when tables are empty.
+///     Visible in Scalar (GET endpoints) and in MySQL.
 ///     Idempotent: safe to run on every startup.
 /// </summary>
 public static class DatabaseSeeder
@@ -15,7 +24,22 @@ public static class DatabaseSeeder
     /// <param name="context">The database context.</param>
     public static void Seed(AppDbContext context)
     {
-        const int demoUserId = 1;
+        // Users
+        User serUser1, serUser2;
+        if (!context.Set<User>().Any())
+        {
+            serUser1 = new User(new RegisterUserCommand("usuario@bicigo.test", "BiciGO123!", "Usuario Demo", "", "tarifa", "Lima"));
+            serUser1.ApplyUpdate(new UpdateUserCommand(Balance: 49.97m, Role: "USER"));
+            serUser2 = new User(new RegisterUserCommand("operador@bicigo.test", "BiciGO123!", "Operador Demo", "", "tarifa", "Lima"));
+            serUser2.ApplyUpdate(new UpdateUserCommand(Balance: 0m, Role: "OPERATOR"));
+            context.Set<User>().AddRange(serUser1, serUser2);
+            context.SaveChanges();
+        }
+        else
+        {
+            serUser1 = context.Set<User>().First(u => u.Email == "usuario@bicigo.test");
+            serUser2 = context.Set<User>().First(u => u.Email == "operador@bicigo.test");
+        }
 
         // Plans
         Plan plan1, plan2;
@@ -38,17 +62,96 @@ public static class DatabaseSeeder
         }
         if (!context.Set<Subscription>().Any())
         {
-            context.Set<Subscription>().Add(new Subscription(new CreateSubscriptionCommand(demoUserId, plan1.Id, "PAY_PER_USE", 0m, "2026-10-01T10:00:00Z")));
-            context.Set<Subscription>().Add(new Subscription(new CreateSubscriptionCommand(demoUserId, plan2.Id, "MONTHLY", 30m, "2026-10-01T10:00:00Z")));
+            context.Set<Subscription>().Add(new Subscription(new CreateSubscriptionCommand(serUser1.Id, plan1.Id, "PAY_PER_USE", 0m, "2026-10-01T10:00:00Z")));
+            context.Set<Subscription>().Add(new Subscription(new CreateSubscriptionCommand(serUser1.Id, plan2.Id, "MONTHLY", 30m, "2026-10-01T10:00:00Z")));
         }
         if (!context.Set<Payment>().Any())
         {
-            context.Set<Payment>().Add(new Payment(new CreatePaymentCommand(null, null, demoUserId, "TOPUP", 50m, "PEN", false, "2026-10-01T09:00:00Z")));
-            context.Set<Payment>().Add(new Payment(new CreatePaymentCommand(null, "TRIP-001", demoUserId, "CHARGE", 9m, "PEN", true, "2026-10-01T11:00:00Z")));
+            context.Set<Payment>().Add(new Payment(new CreatePaymentCommand(null, null, serUser1.Id, "TOPUP", 50m, "PEN", false, "2026-10-01T09:00:00Z")));
+            context.Set<Payment>().Add(new Payment(new CreatePaymentCommand(null, "TRIP-001", serUser1.Id, "CHARGE", 9m, "PEN", true, "2026-10-01T11:00:00Z")));
         }
         if (!context.Set<PaymentMethod>().Any())
         {
-            context.Set<PaymentMethod>().Add(new PaymentMethod(new CreatePaymentMethodCommand(demoUserId, "****2777", "CARD", true)));
+            context.Set<PaymentMethod>().Add(new PaymentMethod(new CreatePaymentMethodCommand(serUser1.Id, "****2777", "CARD", true)));
+        }
+        context.SaveChanges();
+
+        BikePoint point;
+        if (!context.Set<BikePoint>().Any())
+        {
+            point = new BikePoint(new RegisterBikePointCommand("Paleta Storm", "Lima", "Jr. Jose Nicolas Rodrigo 100, Miraflores", -12.12, -77.03, 10));
+            context.Set<BikePoint>().Add(point);
+            context.SaveChanges();
+        }
+        else
+        {
+            point = context.Set<BikePoint>().First();
+        }
+
+        Bicycle bike1, bike2;
+        if (!context.Set<Bicycle>().Any())
+        {
+            bike1 = new Bicycle(new RegisterBicycleCommand("BG-1042", "BGO-1042", "BICIGO-BGO-1042", "City", point.Id));
+            bike2 = new Bicycle(new RegisterBicycleCommand("BG-1043", "BGO-1043", "BICIGO-BGO-1043", "City", point.Id));
+            context.Set<Bicycle>().AddRange(bike1, bike2);
+            context.Set<BicycleAssignment>().Add(new BicycleAssignment(bike1.Id, point.Id, "ASSIGN"));
+            context.SaveChanges();
+        }
+        else
+        {
+            bike1 = context.Set<Bicycle>().First(b => b.BikeCode == "BGO-1042");
+            bike2 = context.Set<Bicycle>().First(b => b.BikeCode == "BGO-1043");
+        }
+
+        if (!context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>().Any())
+        {
+            var trip = new backend_bicigo.Trip.Domain.Model.Aggregates.Trip(new CreateTripCommand("TRIP-001", "USER-001", "BIKE-001", "2026-10-01T10:00:00Z"));
+            trip.StartTrip("2026-10-01T10:00:00Z");
+            trip.FinishTrip(4.5m, 0.29m, false, "2026-10-01T11:00:00Z");
+            context.Set<backend_bicigo.Trip.Domain.Model.Aggregates.Trip>().Add(trip);
+        }
+        if (!context.Set<QrValidation>().Any())
+        {
+            var qr = new QrValidation(new CreateQrValidationCommand("QRV-001", "TRIP-001", "BIKE-001", "BIKE-001-QR"));
+            qr.Validate("BIKE-001-QR");
+            context.Set<QrValidation>().Add(qr);
+        }
+        if (!context.Set<TripUser>().Any())
+        {
+            context.Set<TripUser>().Add(new TripUser("USER-001", "Usuario Demo 1", "usuario@bicigo.test", "USER", true));
+        }
+        if (!context.Set<TripRoutePoint>().Any())
+        {
+            context.Set<TripRoutePoint>().AddRange(
+                new TripRoutePoint("TRIP-001", -12.12, -77.03, 0, "2026-10-01T10:05:00Z"),
+                new TripRoutePoint("TRIP-001", -12.11, -77.02, 1, "2026-10-01T10:30:00Z"),
+                new TripRoutePoint("TRIP-001", -12.105, -77.015, 2, "2026-10-01T11:00:00Z"));
+        }
+        if (!context.Set<TripPhotoEvidence>().Any())
+        {
+            context.Set<TripPhotoEvidence>().Add(new TripPhotoEvidence("TRIP-001", "https://example.com/foto-devolucion-001.jpg", "2026-10-01T11:00:00Z"));
+        }
+        context.SaveChanges();
+
+        MaintenanceReport report;
+        if (!context.Set<MaintenanceReport>().Any())
+        {
+            report = new MaintenanceReport(new CreateMaintenanceReportCommand("BIKE-001", "BRAKES", "Frenos delanteros no responden al presionar la manija", "RPT-001"));
+            report.UpdateBikeStatus("MAINTENANCE");
+            context.Set<MaintenanceReport>().Add(report);
+            context.SaveChanges();
+        }
+        else
+        {
+            report = context.Set<MaintenanceReport>().First();
+        }
+        if (!context.Set<MaintenanceStatusHistory>().Any())
+        {
+            context.Set<MaintenanceStatusHistory>().Add(new MaintenanceStatusHistory(report.Id, "BIKE-001", "AVAILABLE", "MAINTENANCE", "2026-10-02T09:00:00Z"));
+        }
+        if (!context.Set<UserNotification>().Any())
+        {
+            context.Set<UserNotification>().Add(new UserNotification(serUser1.Id, "Bienvenido a BiciGO", "Tu saldo actual es S/ 49.97", "INFO", false));
         }
         context.SaveChanges();
     }
